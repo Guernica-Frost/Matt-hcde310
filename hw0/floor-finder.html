@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><!-- AIC's image server rejects requests that send a Referer -->
+<title>AIC Floor Finder</title>
+<style>
+  :root { --bg:#f7f4ef; --ink:#1d1d1d; --muted:#6b6b6b; --accent:#b50938; --room:#e6dfd3; --line:#d3c9ba; }
+  * { box-sizing:border-box; } body { margin:0; font-family:system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:12px 16px; }
+  .logo { border:2px solid var(--ink); padding:6px 10px; font-weight:800; letter-spacing:.06em; } .logo span { color:var(--accent); }
+  form { display:flex; gap:6px; flex:0 1 440px; position:relative; }
+  form input { flex:1; min-width:0; padding:9px 12px; font-size:1rem; border:2px solid var(--ink); border-radius:6px; }
+  #info { width:38px; border:2px solid var(--ink); border-radius:50%; background:#fff; font:italic 700 1.1rem Georgia, serif; cursor:pointer; }
+  #help { display:none; position:absolute; top:46px; left:0; right:0; z-index:5; background:#fff; border:2px solid var(--ink); border-radius:6px; padding:10px 12px; font-size:.9rem; line-height:1.4; } #help.open { display:block; }
+  main { display:grid; grid-template-columns:90px 1fr 300px; gap:12px; padding:0 16px 16px; height:calc(100vh - 70px); }
+  #floors { display:flex; flex-direction:column; gap:10px; overflow-y:auto; padding-top:20px; }
+  #floors button { padding:14px 4px; font-size:1.2rem; font-weight:700; border:2px solid var(--ink); border-radius:8px; background:#fff; cursor:pointer; } #floors button.on { background:var(--ink); color:#fff; }
+  #center { display:flex; flex-direction:column; min-height:0; } #status { color:var(--muted); font-size:.9rem; min-height:1.3em; }
+  #plan { flex:1; min-height:300px; display:flex; align-items:center; justify-content:center; overflow:hidden; } #plan svg { width:100%; max-height:100%; transform:perspective(1400px) rotateX(24deg); }
+  .room { fill:var(--room); stroke:var(--line); stroke-width:2; } .room.hot { fill:#f6d6de; stroke:var(--accent); stroke-width:5; }
+  .rl { font-size:13px; fill:var(--muted); text-anchor:middle; }
+  .work { cursor:pointer; } .work circle { fill:#fff; stroke:var(--ink); stroke-width:2; }
+  .work.hot circle { stroke:var(--accent); stroke-width:6; animation:pulse 1.2s ease-in-out infinite; } .callout { font-size:22px; font-weight:700; fill:var(--accent); text-anchor:middle; paint-order:stroke; stroke:#fff; stroke-width:6px; }
+  @keyframes pulse { 50% { stroke-width:14; } }
+  #detail { display:flex; gap:12px; align-items:center; background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  #detail:empty { display:none; } #detail img { width:90px; height:90px; object-fit:cover; border-radius:6px; }
+  .where { font-weight:700; color:#1d6b2f; } .where.off { color:var(--muted); }
+  #results { list-style:none; margin:0; padding:0; overflow-y:auto; } #results li { display:flex; gap:10px; padding:8px; border-bottom:1px solid var(--line); cursor:pointer; }
+  #results li:hover { background:#fff; } #results img { width:56px; height:56px; object-fit:cover; background:#ddd; border-radius:4px; flex:none; }
+  small { color:var(--muted); display:block; } @media (max-width:800px) { main { grid-template-columns:64px 1fr; height:auto; } #results { grid-column:1 / -1; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">AIC <span>FLOOR FINDER</span></div>
+  <form id="search">
+    <button type="button" id="info" aria-label="How to use">i</button>
+    <input id="q" type="search" placeholder="Search an artwork or artist, e.g. Nighthawks">
+    <div id="help">Search for an artwork or artist, then click a result: the map jumps to the floor where it hangs and highlights it.
+      Use the floor buttons on the left to browse popular works on each floor. The map is approximate, drawn from gallery coordinates.</div>
+  </form>
+</header>
+<main>
+  <nav id="floors" aria-label="Floors"></nav>
+  <section id="center"><div id="status">Loading the museum map…</div><div id="plan"></div><div id="detail"></div></section>
+  <ul id="results"></ul>
+</main>
+<script>
+// ---------- Setup ----------
+const API = 'https://api.artic.edu/api/v1', IIIF = 'https://www.artic.edu/iiif/2';
+const FLOORS = [['3', '3F'], ['2', '2F'], ['1', '1F'], ['LL', '-1F']];
+const FIELDS = 'id,title,artist_title,date_display,image_id,gallery_id,gallery_title,is_on_view';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const thumb = (w, size = 200) => w.image_id ? `${IIIF}/${w.image_id}/full/${size},/0/default.jpg` : '';
+const floorName = f => FLOORS.find(x => x[0] === f)?.[1] ?? f;
+let galleries = {}, shown = {}, results = {}, box, drawId = 0;
+
+// ---------- Talking to the API ----------
+async function searchArt(params) {
+  const res = await fetch(`${API}/artworks/search?params=${encodeURIComponent(JSON.stringify({ ...params, fields: FIELDS }))}`);
+  if (!res.ok) throw new Error('API error ' + res.status);
+  return (await res.json()).data;
+}
+async function loadGalleries() {
+  let url = `${API}/galleries?limit=100&fields=id,title,floor,latitude,longitude`;
+  while (url) { // follow pages until there are no more
+    const d = await (await fetch(url)).json();
+    d.data.filter(g => g.latitude && g.floor).forEach(g => galleries[g.id] = g);
+    url = d.pagination.next_url;
+  }
+  const all = Object.values(galleries), lat = all.map(g => g.latitude), lng = all.map(g => g.longitude);
+  box = { minLat: Math.min(...lat), maxLat: Math.max(...lat), minLng: Math.min(...lng), maxLng: Math.max(...lng) };
+  box.W = 1000; // height keeps the real proportions (a degree of longitude is shorter than latitude in Chicago)
+  box.H = Math.round(1000 * (box.maxLat - box.minLat) / ((box.maxLng - box.minLng) * Math.cos(41.88 * Math.PI / 180)));
+}
+// Turn a gallery's latitude/longitude into x/y on the drawing (same scale for every floor).
+const xy = g => [60 + (g.longitude - box.minLng) / (box.maxLng - box.minLng) * (box.W - 120),
+                 60 + (box.maxLat - g.latitude) / (box.maxLat - box.minLat) * (box.H - 120)];
+
+// ---------- Floor plan ----------
+async function showFloor(floor, focus) {
+  const id = ++drawId; // if the user clicks again before this finishes, drop the old result
+  document.querySelectorAll('#floors button').forEach(b => b.classList.toggle('on', b.dataset.f === floor));
+  const rooms = Object.values(galleries).filter(g => g.floor === floor);
+  $('#status').textContent = `Loading works on ${floorName(floor)}…`;
+  try {
+    const works = await searchArt({ limit: 30, query: { bool: { must: [
+      { term: { is_on_view: true } }, { terms: { gallery_id: rooms.map(r => r.id) } }] } } });
+    if (id !== drawId) return;
+    if (focus && !works.some(w => w.id === focus.id)) works.push(focus);
+    drawPlan(rooms, works, focus);
+    $('#status').textContent = focus ? `${focus.title} is on ${floorName(floor)}, ${galleries[focus.gallery_id].title}.`
+      : `${floorName(floor)}: ${rooms.length} galleries · ${works.length} popular works shown. Click one for details.`;
+  } catch (e) { $('#status').textContent = 'Could not load this floor. ' + e.message; }
+}
+function drawPlan(rooms, works, focus) {
+  const perRoom = {}; shown = {};
+  works.sort((a, b) => (a.id === focus?.id) - (b.id === focus?.id)); // highlighted work is drawn last, on top
+  const roomSvg = rooms.map(r => { const [x, y] = xy(r), hot = focus?.gallery_id === r.id;
+    return `<rect class="room${hot ? ' hot' : ''}" x="${x - 30}" y="${y - 30}" width="60" height="60" rx="8"/>
+      <text class="rl" x="${x}" y="${y + 46}">${esc(r.title.replace(/^Gallery /, '').slice(0, 14))}</text>`; }).join('');
+  const workSvg = works.map(w => { const g = galleries[w.gallery_id]; if (!g) return '';
+    shown[w.id] = w;
+    const k = perRoom[g.id] = (perRoom[g.id] || 0) + 1, hot = focus?.id === w.id, r = hot ? 30 : 17;
+    let [x, y] = xy(g); if (k > 1 && !hot) { x += Math.cos(k * 2.1) * 22; y += Math.sin(k * 2.1) * 22; } // fan out works sharing a room
+    return `<g class="work${hot ? ' hot' : ''}" data-id="${w.id}"><title>${esc(w.title)}</title>
+      <clipPath id="c${w.id}"><circle cx="${x}" cy="${y}" r="${r}"/></clipPath><circle cx="${x}" cy="${y}" r="${r}"/>
+      <image href="${thumb(w)}" x="${x - r}" y="${y - r}" width="${2 * r}" height="${2 * r}" clip-path="url(#c${w.id})" preserveAspectRatio="xMidYMid slice"/>
+      ${hot ? `<text class="callout" x="${x}" y="${y - r - 14}">★ ${esc(w.title.slice(0, 40))}</text>` : ''}</g>`; }).join('');
+  $('#plan').innerHTML = `<svg viewBox="0 0 ${box.W} ${box.H}" role="img" aria-label="Floor plan">${roomSvg}${workSvg}</svg>`;
+}
+
+// ---------- Artwork details + the "jump to floor" moment ----------
+function showDetail(w) {
+  const g = galleries[w.gallery_id];
+  const where = !w.is_on_view ? '<span class="where off">Not currently on view.</span>'
+    : g ? `<span class="where">📍 ${esc(g.title)} · ${floorName(g.floor)}</span>`
+    : `<span class="where off">On view${w.gallery_title ? ' in ' + esc(w.gallery_title) : ''}, but not on this map.</span>`;
+  $('#detail').innerHTML = `${w.image_id ? `<img src="${thumb(w, 400)}" alt="">` : ''}
+    <div><strong>${esc(w.title)}</strong><small>${esc(w.artist_title || 'Unknown artist')}, ${esc(w.date_display)}</small>${where}</div>`;
+}
+function locate(w) {
+  showDetail(w);
+  const g = galleries[w.gallery_id];
+  if (w.is_on_view && g) showFloor(g.floor, w);
+  else $('#status').textContent = `${w.title} is not currently on view.`;
+}
+
+// ---------- Wiring up clicks and the search bar ----------
+$('#floors').innerHTML = FLOORS.map(([f, label]) => `<button data-f="${f}">${label}</button>`).join('');
+$('#floors').onclick = e => { const f = e.target.dataset.f; if (f) { $('#detail').innerHTML = ''; showFloor(f); } };
+$('#plan').onclick = e => { const g = e.target.closest('.work'); if (g) locate(shown[g.dataset.id]); };
+$('#results').onclick = e => { const li = e.target.closest('li'); if (li) locate(results[li.dataset.id]); };
+$('#info').onclick = () => $('#help').classList.toggle('open');
+$('#search').onsubmit = async e => {
+  e.preventDefault();
+  const q = $('#q').value.trim(); if (!q) return;
+  $('#results').innerHTML = '<li>Searching…</li>';
+  try {
+    const data = await searchArt({ q, limit: 20 }); results = {};
+    $('#results').innerHTML = data.map(w => { results[w.id] = w; const g = galleries[w.gallery_id];
+      return `<li data-id="${w.id}"><img src="${thumb(w)}" alt=""><div><strong>${esc(w.title)}</strong>
+        <small>${esc(w.artist_title || 'Unknown artist')}</small><small>${w.is_on_view && g ? `${floorName(g.floor)} · ${esc(g.title)}` : 'Not currently on view'}</small></div></li>`;
+    }).join('') || '<li>No artworks found. Try another name.</li>';
+  } catch (err) { $('#results').innerHTML = `<li>Search failed: ${esc(err.message)}</li>`; }
+};
+loadGalleries().then(() => showFloor('1')).catch(e => $('#status').textContent = 'Could not load the map. ' + e.message);
+</script>
+</body>
+</html>
