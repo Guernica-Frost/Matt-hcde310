@@ -7,32 +7,27 @@
 # 4. The reply is a list of today's photos. Print the caption and the date of the first one
 
 import os
-import sys
-
 import requests
 from dotenv import load_dotenv
-
 load_dotenv()
 key = os.getenv("NASA_API_KEY")
+params = {"api_key": key}
 
-if not key:
-    print("NASA_API_KEY is missing. Check your .env file.")
+url = "https://api.nasa.gov/EPIC/api/natural"
+response = requests.get(url, params = params, timeout=10)
+
+def newest_photo_date(photos):
+    """Takes a list of photo dictionaries and returns the latest 'date' string."""
+    newest = photos[0]
+    for photo in photos:
+        if photo["date"] >  newest["date"]:
+            newest = photo
+    return newest
+
+# print(response.status_code)
+
+if response.status_code == 200:
+    photo = response
+    print(response.json())
 else:
-    # Request Earth photos from NASA
-    url = "https://api.nasa.gov/EPIC/api/natural"
-    r = requests.get(url, params={"api_key": key}, timeout=10)
-
-    # Check the status code before using the data
-    print("Status code:", r.status_code)
-
-    if r.status_code == 200:
-        photos = r.json()
-
-        if photos:
-            first_photo = photos[0]
-            print("Caption:", first_photo["caption"])
-            print("Date:", first_photo["date"])
-        else:
-            print("No photos were returned.")
-    else:
-        print("The request failed. Check the status code above.")
+    print(response.status_code, "error!")
