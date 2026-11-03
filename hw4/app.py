@@ -1,21 +1,45 @@
 from flask import Flask, render_template,request
 from api import search_art
 
-# AI-written (pseudocode comments only)
-
 # create the Flask app
+app = Flask(__name__)
 
-# route "/": show home.html with the search form
+# Show the search form so the user can enter an author name.
+@app.route("/")
+def home():
+    return render_template("home.html")
 
-# route "/results":
-# get the search term from the form (request.args)
-# strip spaces from the term
-# if the term is empty: show results.html with an "enter a search word" message
-# call search_art(term) to get the artworks
-# if it returned None: show results.html with an "API error, try again later" message
-# if the list is empty: show results.html with a "no results for <term>" message
-# otherwise: show results.html with the term and the list of artworks
+# Handle the submitted search. Show results.html for matches, or home.html
+# with a helpful message so the user can try another search.
+@app.route("/results")
+def results():
+    # Trim whitespace so a spaces-only search counts as empty input.
+    author = request.args.get("author_search", "").strip()
 
-# in results.html: use a default for a missing field (no date, no image, no artist)
+    # An empty search gets a message before any API request is made.
+    if not author:
+        return render_template("home.html", message="Please enter an author name and try again.")
+
+    artworks = search_art(author)
+
+    # None means the API request failed, so offer a message and the search form.
+    if artworks is None:
+        return render_template("home.html", message="We couldn't load the artworks. Please try again later.")
+
+    # An empty list means the request succeeded but returned no artworks.
+    if not artworks:
+        return render_template("home.html", message="No artworks found. Check the author's spelling or try another author.")
+
+    # Replace missing or empty fields with readable labels so each row is useful.
+    for artwork in artworks:
+        if not artwork.get("title"):
+            artwork["title"] = "Unknown"
+        if not artwork.get("artist_title"):
+            artwork["artist_title"] = "Unknown artist"
+        if not artwork.get("date_display"):
+            artwork["date_display"] = "Date Unknown"
+
+    return render_template("results.html", artworks=artworks, author=author)
 
 # run the app in debug mode when this file is run directly
+if __name__ == "__main__": app.run(debug=True)
