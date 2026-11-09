@@ -22,7 +22,7 @@ No API key and no .env file are needed.
 
 **Two things to point out when presenting:**
 
-1. **`fields` and `limit` keep the response small.** Without them, every book comes back with dozens of fields. Here we ask only for what we print, and only 5 results.
+1. **'fields' and 'limit' keep the response small.** Without them, every book comes back with dozens of fields. Here we ask only for what we print, and only 5 results.
 2. **The first result is spam.** Open Library is edited by the public, like a wiki, so someone changed a real record's title to an ad. The API returns it anyway. Don't assume API data is clean just because it came from a "real" source.
 
 ## Gotchas

@@ -1,9 +1,9 @@
 # Search Open Library for books and print title, author, and first publish year.
 import requests
 
-# term = input("Search the Art Institute for: ")
+term = input("Search the Books: ")
 url = "https://openlibrary.org/search.json"
-params = {"q": "the hobbit", "fields": "key,title,author_name,first_publish_year", "limit": 10}
+params = {"q": term, "fields": "key,title,author_name,first_publish_year", "limit": 10}
 
 headers = {"User-Agent": "hcde310-api-fair (chengs35@uw.edu)"}
 
