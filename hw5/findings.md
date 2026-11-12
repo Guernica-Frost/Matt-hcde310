@@ -1,7 +1,7 @@
 # HW5 findings
 
 ## 1. Drawing: one search for "Monet"
-(photo here)
+IMG_0116.PNG in the folder
 
 ## 2. Two questions about the code
 1. In app route, why using methods=["GET", "POST"], what's its use.
@@ -28,7 +28,7 @@ Answers to my two questions, in my own words:
 What was wrong: The app accepts every hit, which makes made-up artist returned real paintings result.
 What I changed: I changed the new query to only search artist_title, match_phrase lets someone type either Monet or Claude Monet.
 How I checked it works: I checked the changes by search Monet first, and then tried Claude Monet, which returns right artworks from the artist I searched. After that, I typed a make-up word in search bar and hit search. It returns nothing but error message.
-Commit before: 1e2c332772db58c56c24109eec85f4e3b077b1f0  Commit after: (hash)
+Commit before: 1e2c332772db58c56c24109eec85f4e3b077b1f0  Commit after: 09c9564a44572d8af5f035e96ad0cfa23a47952c
 
 ## 6. Can we ship it? (100–150 words)
 Yes or no, and why: No. There are still some problems after my fix stopped made-up words from returning random paintings. The basic search work is fine now. What if the API times out or fails, the page shows the raw Python error, which looks broken and leaks details. The app also runs with debug=True, which shouldn’t go live. Artworks with no title show “None” as the heading. The form uses POST, so users can't bookmark, share or refresh a search. So I'll say there are still a couple days' work from shipping out. We need to fix the error message and debug mode first, rerun the tests, then ship.
